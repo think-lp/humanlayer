@@ -173,7 +173,7 @@
 		"@types/react": "catalog:",
 		"@types/react-dom": "catalog:",
 		"@types/react-syntax-highlighter": "^15.5.13",
-		"happy-dom": "20.9.0",
+		"happy-dom": "21.0.4",
 		"storybook": "catalog:",
 		"tailwindcss": "^4.1.15",
 		"typescript": "catalog:",
