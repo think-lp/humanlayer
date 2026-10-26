@@ -40,8 +40,11 @@ services:
       postgres:
         condition: service_healthy
 
+  # MinIO no longer publishes public images on Docker Hub or Quay; Chainguard's builds are distroless,
+  # so readiness is left to devstack's S3 HeadBucket probe and minio-setup retries until MinIO answers.
   minio:
-    image: docker.io/minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest
+    user: "0"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
@@ -51,23 +54,15 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
   minio-setup:
-    image: docker.io/minio/mc:latest
+    image: cgr.dev/chainguard/minio-client:latest
     depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 ${S3_ACCESS_KEY_ID:-minioadmin} ${S3_SECRET_ACCESS_KEY:-minioadmin};
-      mc mb --ignore-existing local/${S3_ARTIFACTS_BUCKET:-riptide-artifacts};
-      exit 0;
-      "
+      - minio
+    restart: on-failure
+    environment:
+      MC_HOST_local: http://${S3_ACCESS_KEY_ID:-minioadmin}:${S3_SECRET_ACCESS_KEY:-minioadmin}@minio:9000
+    command: ["mb", "--ignore-existing", "local/${S3_ARTIFACTS_BUCKET:-riptide-artifacts}"]
 
   durable-streams:
     image: humanlayer/durable-streams-server:0.3.0-cebb50e
@@ -107,7 +102,25 @@ services:
       timeout: 5s
       retries: 10
 
+  # Opt-in replacement for a host-installed Caddy: set COMPOSE_PROFILES=caddy and DEVSTACK_CADDY=docker
+  # in .env. Host networking keeps the generated config's 127.0.0.1 upstreams and localhost:2019 admin
+  # address pointing at the host; --watch picks up the config devstack sync regenerates.
+  caddy:
+    image: docker.io/caddy:2.10-alpine
+    profiles: ["caddy"]
+    network_mode: host
+    restart: unless-stopped
+    command: caddy run --config /devstack/Caddyfile.generated --adapter caddyfile --watch
+    volumes:
+      - ${DEVSTACK_CADDY_CONFIG_DIR:-${HOME}/.humanlayer/dev}:/devstack:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
+  caddy-data:
+    name: devstack-caddy-data
+  caddy-config:
+    name: devstack-caddy-config
   postgresql_data:
     name: ${DEVSTACK_POSTGRES_VOLUME:-electric_quickstart_postgresql_data}
   minio_data:

@@ -33,6 +33,11 @@ const ROUTE_PORTS = {
 	s3: 'minioApi',
 } as const
 
+/** The `caddy` Compose service owns the process and reloads on config changes via `--watch`. */
+export function caddyRunsInDocker(): boolean {
+	return process.env.DEVSTACK_CADDY === 'docker'
+}
+
 export function caddyConfigPath(registryPath: string): string {
 	return join(dirname(registryPath), 'Caddyfile.generated')
 }
@@ -187,7 +192,7 @@ export async function regenerateCaddyConfig(
 			`${JSON.stringify({ active: Object.keys(registry.stacks).length > 0, configPath }, null, 2)}\n`,
 			{ mode: 0o600 },
 		)
-	} else if (options.reload !== false) {
+	} else if (options.reload !== false && !caddyRunsInDocker()) {
 		await validateConfig(configPath)
 		await runCaddy(
 			['reload', '--force', '--config', configPath, '--address', 'localhost:2019'],
@@ -419,6 +424,13 @@ export async function ensureCaddy(registryPath: string, options: EnsureCaddyOpti
 		restart: restartCaddy,
 		status: caddyStatus,
 		...options.runtime,
+	}
+	if (caddyRunsInDocker()) {
+		const configPath = caddyConfigPath(registryPath)
+		if (options.dryRun) return { running: true, pid: null, configPath, plannedAction: 'none' }
+		const routes = expectedRoutes(await readRegistry(registryPath))
+		await verifyCaddy(routes, runtime, { timeoutMs: 15_000, retryMs: 500, ...options.verification })
+		return { running: true, pid: null, configPath, plannedAction: 'none' }
 	}
 	const status = await runtime.status(registryPath, { repairStaleState: !options.dryRun })
 	const plannedAction: 'start' | 'reload' = status.running ? 'reload' : 'start'

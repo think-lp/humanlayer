@@ -135,6 +135,32 @@ describe.skipIf(Boolean(process.env.CI))('ensureCaddy', () => {
 			}),
 		).rejects.toThrow('Caddy restart did not converge: Caddy verification did not converge')
 	})
+
+	it('only verifies when the Compose caddy service owns the process', async () => {
+		vi.stubEnv('DEVSTACK_CADDY', 'docker')
+		try {
+			const path = await registryPath()
+			const start = vi.fn()
+			const reload = vi.fn()
+			const probeRoute = vi.fn().mockResolvedValue(undefined)
+			const result = await ensureCaddy(path, {
+				runtime: {
+					status: vi.fn().mockResolvedValue({ running: false, pid: null, configPath: 'config' }),
+					start,
+					reload,
+					fetch: vi.fn().mockResolvedValue(Response.json(activeConfig())) as unknown as typeof fetch,
+					probeRoute,
+				},
+			})
+
+			expect(result.plannedAction).toBe('none')
+			expect(start).not.toHaveBeenCalled()
+			expect(reload).not.toHaveBeenCalled()
+			expect(probeRoute).toHaveBeenCalledWith('api.test.localhost')
+		} finally {
+			vi.unstubAllEnvs()
+		}
+	})
 })
 
 describe.skipIf(Boolean(process.env.CI))('renderCaddyConfig', () => {
